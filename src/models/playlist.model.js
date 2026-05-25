@@ -22,6 +22,11 @@ const playlistSchema = new mongoose.Schema(
       default: "",
     },
 
+    cloudinaryCoverPublicId: {
+      type: String,
+      default: null,
+    },
+
     // owner/user who created playlist
     userId: {
       type: mongoose.Schema.Types.ObjectId,

@@ -3,6 +3,16 @@ import { MUSIC_GENRES } from "../utils/constants.js";
 
 export function validateMusicUpload(req, res, next) {
   try {
+    // Fallback artist to user's full name if missing in req.body
+    let artistName = req.body.artist;
+    if (!artistName && req.user?.fullName) {
+      artistName = `${req.user.fullName.firstName} ${req.user.fullName.lastName || ""}`.trim();
+    }
+    if (!artistName) {
+      artistName = "Unknown Artist";
+    }
+    req.body.artist = artistName;
+
     const { title, artist, genre } = req.body;
     const errors = [];
 
@@ -67,7 +77,7 @@ export function validateMusicUpload(req, res, next) {
  * Validate search query
  */
 export function validateSearchQuery(req, res, next) {
-  const { query } = req.query;
+  const query = req.query.query || req.query.q;
 
   if (!query || query.trim().length === 0) {
     return res.status(400).json({
@@ -82,6 +92,9 @@ export function validateSearchQuery(req, res, next) {
       message: "Search query cannot exceed 100 characters",
     });
   }
+
+  // Ensure req.query.query is populated for downstream controller
+  req.query.query = query;
 
   next();
 }

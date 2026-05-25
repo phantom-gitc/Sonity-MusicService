@@ -90,11 +90,11 @@ export async function verifyArtist(req, res, next) {
       });
     }
 
-    // Check if user is artist or admin (admin can do everything)
-    if (req.user.role !== "artist" && req.user.role !== "admin") {
+    // Check if user is artist, creator, or admin (admin can do everything)
+    if (req.user.role !== "creator" && req.user.role !== "artist" && req.user.role !== "admin") {
       return res.status(403).json({
         success: false,
-        message: "Artist access required to upload music",
+        message: "Creator access required",
       });
     }
 

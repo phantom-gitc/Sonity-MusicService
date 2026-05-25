@@ -1,29 +1,41 @@
 import express from "express";
+import multer from "multer";
 import * as playlistController from "../controller/playlist.controller.js";
 import { verifyToken } from "../middlewares/auth.middlewares.js";
 import { validatePlaylist } from "../middlewares/validation.middlewares.js";
 
 const router = express.Router();
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedImageMimes = ["image/jpeg", "image/png", "image/webp"];
+    if (allowedImageMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type for coverImage. Allowed types: JPEG, PNG, WebP"));
+    }
+  },
+});
+
 
 // GET  /api/playlist
-
 router.get("/", playlistController.getPublicPlaylists);
 
+// GET /api/playlist/library/saved
+router.get("/library/saved", verifyToken, playlistController.getSavedPlaylists);
 
 // GET  /api/playlist/user/my-playlists
-
-
 router.get("/user/my-playlists", verifyToken, playlistController.getMyPlaylists);
 
 // POST /api/playlist
-
-router.post("/", verifyToken, validatePlaylist, playlistController.createPlaylist);
+router.post("/", verifyToken, upload.single("coverImage"), validatePlaylist, playlistController.createPlaylist);
 
 
 // GET  /api/playlist/:playlistId
-
-
 router.get("/:playlistId", (req, res, next) => {
   const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
   if (token) {
@@ -32,16 +44,27 @@ router.get("/:playlistId", (req, res, next) => {
   next();                                 
 }, playlistController.getPlaylistById);
 
-// PATCH /api/playlist/:playlistId/visibility
+// GET /api/playlist/:playlistId/play-all
+router.get("/:playlistId/play-all", playlistController.playAllPlaylist);
 
+// GET /api/playlist/:playlistId/shuffle
+router.get("/:playlistId/shuffle", playlistController.shufflePlaylist);
+
+// PATCH /api/playlist/:playlistId/visibility
 router.patch(
   "/:playlistId/visibility",
   verifyToken,
   playlistController.togglePlaylistVisibility
 );
 
-// POST  /api/playlist/:playlistId/songs/:musicId
+// POST /api/playlist/:playlistId/save
+router.post(
+  "/:playlistId/save",
+  verifyToken,
+  playlistController.toggleSavePlaylist
+);
 
+// POST  /api/playlist/:playlistId/songs/:musicId
 router.post(
   "/:playlistId/songs/:musicId",
   verifyToken,
@@ -49,7 +72,6 @@ router.post(
 );
 
 // DELETE /api/playlist/:playlistId/songs/:musicId
-
 router.delete(
   "/:playlistId/songs/:musicId",
   verifyToken,
@@ -57,16 +79,15 @@ router.delete(
 );
 
 // PATCH /api/playlist/:playlistId
-
 router.patch(
   "/:playlistId",
   verifyToken,
+  upload.single("coverImage"),
   validatePlaylist,
   playlistController.updatePlaylist
 );
 
 // DELETE /api/playlist/:playlistId
-
 router.delete("/:playlistId", verifyToken, playlistController.deletePlaylist);
 
 export default router;

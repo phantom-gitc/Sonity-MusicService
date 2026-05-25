@@ -43,31 +43,68 @@ const upload = multer({
   },
 });
 
-// Public Routes - No authentication required
+// ─── Queue Routes (must come before /:musicId) ──────────────────────────────
 
+router.get("/queue",                verifyToken, musicController.getQueue);
+router.post("/queue",               verifyToken, musicController.setQueue);
+router.post("/queue/add",           verifyToken, musicController.addToQueue);
+router.post("/queue/next",          verifyToken, musicController.nextTrack);
+router.post("/queue/prev",          verifyToken, musicController.prevTrack);
 
-router.get("/", musicController.getAllMusic);
-router.get("/search", validateSearchQuery, musicController.searchMusic);
-router.get("/genre/:genre", musicController.getMusicByGenre);
-router.get("/artist/:artistId", musicController.getMusicByArtist);
-router.get("/artist-musics", verifyToken, verifyArtist, musicController.getArtistOwnMusic);
-router.get("/:musicId", musicController.getMusicById);
+// ─── Library Routes (must come before /:musicId) ─────────────────────────────
 
-// Protected Routes - Authentication required
+router.get("/library/liked",            verifyToken, musicController.getLikedSongs);
+router.get("/history/recently-played",  verifyToken, musicController.getRecentlyPlayed);
+router.get("/recommendations",          verifyToken, musicController.getRecommendations);
 
+// ─── Creator Routes (must come before /:musicId) ─────────────────────────────
 
-router.post("/upload",verifyToken,verifyArtist,upload.fields([
-    { name: "music", maxCount: 1 },
-    { name: "coverImage", maxCount: 1 },
-  ]),validateMusicUpload,musicController.uploadMusic
+router.get("/creator/stats",        verifyToken, verifyArtist, musicController.getCreatorStats);
+router.get("/artist-musics",        verifyToken, verifyArtist, musicController.getArtistOwnMusic);
+
+// ─── Public Routes ───────────────────────────────────────────────────────────
+
+router.get("/",                     musicController.getAllMusic);
+router.get("/search",               validateSearchQuery, musicController.searchMusic);
+router.get("/genre/:genre",         musicController.getMusicByGenre);
+router.get("/artist/:artistId",     musicController.getMusicByArtist);
+router.get("/:musicId",             musicController.getMusicById);
+router.get("/:musicId/related",     musicController.getRelatedTracks);
+
+// ─── Protected Routes — Auth Required ────────────────────────────────────────
+
+// Play tracking (optionally authenticated — increments count + saves history if logged in)
+router.post(
+  "/:musicId/play",
+  (req, res, next) => {
+    const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
+    if (token) return verifyToken(req, res, next);
+    next();
+  },
+  musicController.trackPlay
 );
 
-// Only artist or admin who uploaded can update/delete
+// Like / unlike
+router.post("/:musicId/like",       verifyToken, musicController.toggleLike);
 
-router.patch("/:musicId", verifyToken, verifyArtist, musicController.updateMusic);
-router.delete("/:musicId", verifyToken, verifyArtist, musicController.deleteMusic);
+// Upload — creator only
+router.post(
+  "/upload",
+  verifyToken,
+  verifyArtist,
+  upload.fields([
+    { name: "music",       maxCount: 1 },
+    { name: "coverImage",  maxCount: 1 },
+  ]),
+  validateMusicUpload,
+  musicController.uploadMusic
+);
 
-// Error handling middleware for multer
+// Update / delete — creator only
+router.patch("/:musicId",   verifyToken, verifyArtist, musicController.updateMusic);
+router.delete("/:musicId",  verifyToken, verifyArtist, musicController.deleteMusic);
+
+// ─── Multer error handler ─────────────────────────────────────────────────────
 
 router.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
