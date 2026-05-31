@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import Music from "../models/music.models.js";
-import { Like, RecentlyPlayed, Queue } from "../models/interaction.models.js";
+import { FollowArtist, Like, RecentlyPlayed, Queue } from "../models/interaction.models.js";
 import {
   uploadMusicFile,
   uploadCoverImage,
@@ -486,6 +486,100 @@ export async function getArtistOwnMusic(req, res) {
   }
 }
 
+/**
+ * POST /api/music/artist/:artistId/follow
+ * Toggle following an artist/creator based on uploaded music ownership.
+ */
+export async function toggleFollowArtist(req, res) {
+  try {
+    const { artistId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(artistId)) {
+      return res.status(400).json({ success: false, message: "Invalid artist ID" });
+    }
+
+    if (String(req.user.id) === String(artistId)) {
+      return res.status(400).json({ success: false, message: "You cannot follow yourself" });
+    }
+
+    const artistHasMusic = await Music.exists({ artistId });
+    if (!artistHasMusic) {
+      return res.status(404).json({ success: false, message: "Artist not found" });
+    }
+
+    const existingFollow = await FollowArtist.findOne({ userId: req.user.id, artistId });
+
+    if (existingFollow) {
+      await FollowArtist.deleteOne({ _id: existingFollow._id });
+      return res.status(200).json({
+        success: true,
+        message: "Artist unfollowed successfully",
+        data: { isFollowing: false },
+      });
+    }
+
+    await FollowArtist.create({ userId: req.user.id, artistId });
+
+    return res.status(201).json({
+      success: true,
+      message: "Artist followed successfully",
+      data: { isFollowing: true },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(200).json({
+        success: true,
+        message: "Artist already followed",
+        data: { isFollowing: true },
+      });
+    }
+
+    console.error("Toggle follow artist error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update artist follow" });
+  }
+}
+
+/**
+ * GET /api/music/library/followed-artists
+ * Returns followed artists with lightweight music stats for library screens.
+ */
+export async function getFollowedArtists(req, res) {
+  try {
+    const follows = await FollowArtist.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const artistIds = follows.map((follow) => follow.artistId);
+
+    if (artistIds.length === 0) {
+      return res.status(200).json({ success: true, data: { artists: [] } });
+    }
+
+    const artists = await Music.aggregate([
+      { $match: { artistId: { $in: artistIds }, isPublished: true } },
+      {
+        $group: {
+          _id: "$artistId",
+          artist: { $first: "$artist" },
+          coverImageUrl: { $first: "$coverImageUrl" },
+          totalSongs: { $sum: 1 },
+          totalPlays: { $sum: "$playCount" },
+          lastReleaseAt: { $max: "$createdAt" },
+        },
+      },
+      { $sort: { artist: 1 } },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: { artists },
+    });
+  } catch (error) {
+    console.error("Get followed artists error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch followed artists" });
+  }
+}
+
 export default {
   uploadMusic,
   getAllMusic,
@@ -496,6 +590,8 @@ export default {
   deleteMusic,
   getMusicByArtist,
   getArtistOwnMusic,
+  toggleFollowArtist,
+  getFollowedArtists,
 };
 
 /**

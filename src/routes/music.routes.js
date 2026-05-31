@@ -3,8 +3,23 @@ import multer from "multer";
 import * as musicController from "../controller/music.controller.js";
 import { verifyToken, verifyArtist } from "../middlewares/auth.middlewares.js";
 import { validateMusicUpload, validateSearchQuery } from "../middlewares/validation.middlewares.js";
+import { isValidMediaBuffer } from "../utils/file-validation.utils.js";
 
 const router = express.Router();
+
+function validateUploadedMediaContent(req, res, next) {
+  const files = Object.values(req.files || {}).flat();
+  const invalidFile = files.find((file) => !isValidMediaBuffer(file));
+
+  if (invalidFile) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid file content for ${invalidFile.fieldname}`,
+    });
+  }
+
+  next();
+}
 
 // Configure multer for in-memory storage
 
@@ -56,6 +71,7 @@ router.post("/queue/prev",          verifyToken, musicController.prevTrack);
 router.get("/library/liked",            verifyToken, musicController.getLikedSongs);
 router.get("/history/recently-played",  verifyToken, musicController.getRecentlyPlayed);
 router.get("/recommendations",          verifyToken, musicController.getRecommendations);
+router.get("/library/followed-artists", verifyToken, musicController.getFollowedArtists);
 
 // ─── Creator Routes (must come before /:musicId) ─────────────────────────────
 
@@ -68,6 +84,7 @@ router.get("/",                     musicController.getAllMusic);
 router.get("/search",               validateSearchQuery, musicController.searchMusic);
 router.get("/genre/:genre",         musicController.getMusicByGenre);
 router.get("/artist/:artistId",     musicController.getMusicByArtist);
+router.post("/artist/:artistId/follow", verifyToken, musicController.toggleFollowArtist);
 router.get("/:musicId",             musicController.getMusicById);
 router.get("/:musicId/related",     musicController.getRelatedTracks);
 
@@ -96,6 +113,7 @@ router.post(
     { name: "music",       maxCount: 1 },
     { name: "coverImage",  maxCount: 1 },
   ]),
+  validateUploadedMediaContent,
   validateMusicUpload,
   musicController.uploadMusic
 );

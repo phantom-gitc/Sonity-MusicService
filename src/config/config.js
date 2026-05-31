@@ -6,9 +6,11 @@ dotenvConfig();
 // Configuration object to hold all the configuration variables
 
 const config = {
+  NODE_ENV: process.env.NODE_ENV || "development",
   PORT: parseInt(process.env.PORT) || 3002,
   MONGO_URI: process.env.MONGO_URI,
   JWT_SECRET: process.env.JWT_SECRET,
+  RABBITMQ_URI: process.env.RABBITMQ_URI || process.env.RABITMQ_URI,
   
   // Cloudinary configuration
 
@@ -20,6 +22,7 @@ const config = {
   
   AUTH_SERVICE_URL: process.env.AUTH_SERVICE_URL || "http://localhost:3000",
   NOTIFICATION_SERVICE_URL: process.env.NOTIFICATION_SERVICE_URL || "http://localhost:3001",
+  FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:5173",
 };
 
 // Validate required environment variables

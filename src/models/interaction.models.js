@@ -38,6 +38,7 @@ const recentlyPlayedSchema = new mongoose.Schema(
   { timestamps: true }
 );
 recentlyPlayedSchema.index({ userId: 1, playedAt: -1 });
+recentlyPlayedSchema.index({ userId: 1, musicId: 1 });
 
 // SavedPlaylist Schema (user saves/follows another user's playlist)
 const savedPlaylistSchema = new mongoose.Schema(
@@ -55,6 +56,23 @@ const savedPlaylistSchema = new mongoose.Schema(
   { timestamps: true }
 );
 savedPlaylistSchema.index({ userId: 1, playlistId: 1 }, { unique: true });
+
+// FollowArtist Schema lets listeners follow creators/artists without changing auth service.
+const followArtistSchema = new mongoose.Schema(
+  {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+    },
+    artistId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+    },
+  },
+  { timestamps: true }
+);
+followArtistSchema.index({ userId: 1, artistId: 1 }, { unique: true });
+followArtistSchema.index({ artistId: 1, createdAt: -1 });
 
 // Queue Schema
 const queueSchema = new mongoose.Schema(
@@ -81,11 +99,13 @@ const queueSchema = new mongoose.Schema(
 export const Like = mongoose.model("Like", likeSchema);
 export const RecentlyPlayed = mongoose.model("RecentlyPlayed", recentlyPlayedSchema);
 export const SavedPlaylist = mongoose.model("SavedPlaylist", savedPlaylistSchema);
+export const FollowArtist = mongoose.model("FollowArtist", followArtistSchema);
 export const Queue = mongoose.model("Queue", queueSchema);
 
 export default {
   Like,
   RecentlyPlayed,
   SavedPlaylist,
+  FollowArtist,
   Queue,
 };

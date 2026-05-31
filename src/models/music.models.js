@@ -97,5 +97,8 @@ const musicSchema = new mongoose.Schema(
 musicSchema.index({ title: "text", artist: "text", genre: 1 });
 musicSchema.index({ isPublished: 1, createdAt: -1 });
 musicSchema.index({ artistId: 1 });
+musicSchema.index({ isPublished: 1, genre: 1, playCount: -1 });
+musicSchema.index({ artistId: 1, createdAt: -1 });
+musicSchema.index({ isPublished: 1, playCount: -1, likeCount: -1 });
 
 export default mongoose.model("Music", musicSchema);

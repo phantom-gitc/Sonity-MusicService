@@ -2,8 +2,16 @@ import express from "express";
 import multer from "multer";
 import * as albumController from "../controller/album.controller.js";
 import { verifyToken, verifyArtist } from "../middlewares/auth.middlewares.js";
+import { isValidMediaBuffer } from "../utils/file-validation.utils.js";
 
 const router = express.Router();
+
+function validateCoverContent(req, res, next) {
+  if (req.file && !isValidMediaBuffer(req.file)) {
+    return res.status(400).json({ success: false, message: "Invalid album cover content" });
+  }
+  next();
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -30,6 +38,7 @@ router.post(
   verifyToken,
   verifyArtist,
   upload.single("coverImage"),
+  validateCoverContent,
   albumController.createAlbum
 );
 
@@ -38,6 +47,7 @@ router.patch(
   verifyToken,
   verifyArtist,
   upload.single("coverImage"),
+  validateCoverContent,
   albumController.updateAlbum
 );
 

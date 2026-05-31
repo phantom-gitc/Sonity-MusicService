@@ -5,19 +5,24 @@ import cors from "cors";
 import musicRoutes    from "./routes/music.routes.js";
 import playlistRoutes from "./routes/playlist.routes.js";
 import albumRoutes    from "./routes/album.routes.js";
+import mongoose from "mongoose";
+import config from "./config/config.js";
+import { createRateLimiter, securityHeaders } from "./middlewares/security.middlewares.js";
 
 // Initialize Express app
 const app = express();
 
 // CORS — allow frontend to send cookies
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  origin: config.FRONTEND_URL,
   credentials: true,
 }));
 
+app.use(securityHeaders);
+app.use(createRateLimiter({ windowMs: 15 * 60 * 1000, max: 500 }));
 app.use(morgan("dev")); // Request logging
-app.use(express.json({ limit: "50mb" })); // JSON body parser with larger limit
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+app.use(express.json({ limit: "2mb" })); // JSON body parser; file uploads still use multipart routes
+app.use(express.urlencoded({ limit: "2mb", extended: true }));
 app.use(cookieParser()); // Cookie parser
 
 // Health check route
@@ -26,6 +31,15 @@ app.get("/health", (req, res) => {
     success: true,
     message: "Music Service is healthy",
     timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/ready", (req, res) => {
+  const isDbReady = mongoose.connection.readyState === 1;
+  res.status(isDbReady ? 200 : 503).json({
+    success: isDbReady,
+    service: "music",
+    database: isDbReady ? "connected" : "disconnected",
   });
 });
 

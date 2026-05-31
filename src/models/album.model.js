@@ -56,5 +56,7 @@ const albumSchema = new mongoose.Schema(
 // Indexes
 albumSchema.index({ title: "text", artist: "text", genre: 1 });
 albumSchema.index({ artistId: 1 });
+albumSchema.index({ artistId: 1, createdAt: -1 });
+albumSchema.index({ isPublished: 1, createdAt: -1 });
 
 export default mongoose.model("Album", albumSchema);
