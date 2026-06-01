@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Music from "../models/music.models.js";
-import { FollowArtist, Like, RecentlyPlayed, Queue } from "../models/interaction.models.js";
+import User from "../models/user.model.js";
+import { FollowArtist, Like, RecentlyPlayed, Queue, FollowUser } from "../models/interaction.models.js";
 import {
   uploadMusicFile,
   uploadCoverImage,
@@ -11,7 +12,6 @@ import {
  * Upload new music track
  * Accepts music file and cover image
  */
-
 export async function uploadMusic(req, res) {
   try {
     const { title, artist, genre, album, releaseYear, lyrics } = req.body;
@@ -27,7 +27,6 @@ export async function uploadMusic(req, res) {
     }
 
     // Validate required fields
-
     if (!title || !artistName || !genre) {
       return res.status(400).json({
         success: false,
@@ -1071,5 +1070,106 @@ export async function prevTrack(req, res) {
   } catch (error) {
     console.error("Prev track error:", error);
     return res.status(500).json({ success: false, message: "Failed to move to previous track" });
+  }
+}
+
+/**
+ * POST /api/music/user/:userId/follow
+ * Toggle following another user (listener or creator)
+ */
+export async function toggleFollowUser(req, res) {
+  try {
+    const { userId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: "Invalid user ID" });
+    }
+
+    if (String(req.user.id) === String(userId)) {
+      return res.status(400).json({ success: false, message: "You cannot follow yourself" });
+    }
+
+    const existingFollow = await FollowUser.findOne({ followerId: req.user.id, followingId: userId });
+
+    if (existingFollow) {
+      await FollowUser.deleteOne({ _id: existingFollow._id });
+      return res.status(200).json({
+        success: true,
+        message: "User unfollowed successfully",
+        data: { isFollowing: false },
+      });
+    }
+
+    await FollowUser.create({ followerId: req.user.id, followingId: userId });
+
+    return res.status(201).json({
+      success: true,
+      message: "User followed successfully",
+      data: { isFollowing: true },
+    });
+  } catch (error) {
+    console.error("Toggle follow user error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update user follow" });
+  }
+}
+
+/**
+ * GET /api/music/library/followed-users
+ * Fetch all users followed by the current user
+ */
+export async function getFollowedUsers(req, res) {
+  try {
+    const follows = await FollowUser.find({ followerId: req.user.id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const followingIds = follows.map((follow) => follow.followingId);
+
+    const users = await User.find({ _id: { $in: followingIds } })
+      .select("fullName email role profileImage")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: { users },
+    });
+  } catch (error) {
+    console.error("Get followed users error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch followed users" });
+  }
+}
+
+/**
+ * GET /api/music/user/:userId/follow-stats
+ * Get follower and following counts for any user
+ */
+export async function getUserFollowStats(req, res) {
+  try {
+    const { userId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: "Invalid user ID" });
+    }
+
+    const [followersCount, followingCount] = await Promise.all([
+      FollowUser.countDocuments({ followingId: userId }),
+      FollowUser.countDocuments({ followerId: userId }),
+    ]);
+
+    const isFollowing = req.user?.id
+      ? await FollowUser.exists({ followerId: req.user.id, followingId: userId })
+      : false;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        followersCount,
+        followingCount,
+        isFollowing: !!isFollowing,
+      },
+    });
+  } catch (error) {
+    console.error("Get user follow stats error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch follow stats" });
   }
 }

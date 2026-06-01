@@ -43,6 +43,9 @@ router.get("/user/my-playlists", verifyToken, playlistController.getMyPlaylists)
 router.post("/", verifyToken, upload.single("coverImage"), validateCoverContent, validatePlaylist, playlistController.createPlaylist);
 
 
+// GET /api/playlist/share/:shareToken
+router.get("/share/:shareToken", playlistController.getPlaylistByShareToken);
+
 // GET  /api/playlist/:playlistId
 router.get("/:playlistId", (req, res, next) => {
   const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
@@ -98,5 +101,37 @@ router.patch(
 
 // DELETE /api/playlist/:playlistId
 router.delete("/:playlistId", verifyToken, playlistController.deletePlaylist);
+
+// POST /api/playlist/:playlistId/collaborators
+router.post(
+  "/:playlistId/collaborators",
+  verifyToken,
+  playlistController.addCollaborator
+);
+
+// DELETE /api/playlist/:playlistId/collaborators/:userId
+router.delete(
+  "/:playlistId/collaborators/:userId",
+  verifyToken,
+  playlistController.removeCollaborator
+);
+
+// GET /api/playlist/:playlistId/share-link
+router.get(
+  "/:playlistId/share-link",
+  verifyToken,
+  playlistController.generateShareLink
+);
+
+// GET /api/playlist/:playlistId/followers
+router.get(
+  "/:playlistId/followers",
+  (req, res, next) => {
+    const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
+    if (token) return verifyToken(req, res, next);
+    next();
+  },
+  playlistController.getPlaylistFollowers
+);
 
 export default router;

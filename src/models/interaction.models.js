@@ -96,10 +96,28 @@ const queueSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// FollowUser Schema
+const followUserSchema = new mongoose.Schema(
+  {
+    followerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+    },
+    followingId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+    },
+  },
+  { timestamps: true }
+);
+followUserSchema.index({ followerId: 1, followingId: 1 }, { unique: true });
+followUserSchema.index({ followingId: 1 });
+
 export const Like = mongoose.model("Like", likeSchema);
 export const RecentlyPlayed = mongoose.model("RecentlyPlayed", recentlyPlayedSchema);
 export const SavedPlaylist = mongoose.model("SavedPlaylist", savedPlaylistSchema);
 export const FollowArtist = mongoose.model("FollowArtist", followArtistSchema);
+export const FollowUser = mongoose.model("FollowUser", followUserSchema);
 export const Queue = mongoose.model("Queue", queueSchema);
 
 export default {
@@ -107,5 +125,6 @@ export default {
   RecentlyPlayed,
   SavedPlaylist,
   FollowArtist,
+  FollowUser,
   Queue,
 };

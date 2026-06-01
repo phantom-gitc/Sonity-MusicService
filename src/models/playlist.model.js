@@ -48,6 +48,21 @@ const playlistSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    // collaborators allowed to add/remove songs
+    collaborators: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    // share token for obfuscated sharing
+    shareToken: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
   },
   {
     timestamps: true,
@@ -59,5 +74,6 @@ const playlistSchema = new mongoose.Schema(
 playlistSchema.index({ userId: 1, createdAt: -1 });  
 playlistSchema.index({ isPublic: 1, createdAt: -1 }); 
 playlistSchema.index({ name: "text" });               
+playlistSchema.index({ shareToken: 1 }, { unique: true, sparse: true });
 
 export default mongoose.model("Playlist", playlistSchema);

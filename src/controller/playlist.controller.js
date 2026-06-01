@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Playlist from "../models/playlist.model.js";
 import Music from "../models/music.models.js";
 import User from "../models/user.model.js";
+import crypto from "crypto";
 import { SavedPlaylist } from "../models/interaction.models.js";
 import { uploadCoverImage, deleteFromCloudinary } from "../services/cloudinary.services.js";
 import jwt from "jsonwebtoken";
@@ -213,6 +214,14 @@ export async function getPlaylistById(req, res) {
       playlist.userId = playlist.userId._id;
     }
 
+    // Fetch followers/likes count from SavedPlaylist model
+    const followersCount = await SavedPlaylist.countDocuments({ playlistId: playlist._id });
+    playlist.followersCount = followersCount;
+
+    // Check if current user has saved/liked the playlist
+    const currentUserId = req.user?.id;
+    playlist.isSaved = currentUserId ? !!(await SavedPlaylist.exists({ userId: currentUserId, playlistId: playlist._id })) : false;
+
     return res.status(200).json({
       success: true,
       message: "Playlist fetched successfully",
@@ -396,8 +405,10 @@ export async function addSongToPlaylist(req, res) {
       return res.status(400).json({ success: false, message: "Cannot add an unpublished track" });
     }
 
-    // Authorization — only owner can add songs
-    if (playlist.userId.toString() !== req.user.id) {
+    // Authorization — only owner or collaborators can add songs
+    const isOwner = playlist.userId.toString() === req.user.id;
+    const isCollaborator = playlist.collaborators?.some((cId) => cId.toString() === req.user.id);
+    if (!isOwner && !isCollaborator) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to modify this playlist",
@@ -460,8 +471,10 @@ export async function removeSongFromPlaylist(req, res) {
       return res.status(404).json({ success: false, message: "Playlist not found" });
     }
 
-    // Authorization
-    if (playlist.userId.toString() !== req.user.id) {
+    // Authorization — only owner or collaborators can remove songs
+    const isOwner = playlist.userId.toString() === req.user.id;
+    const isCollaborator = playlist.collaborators?.some((cId) => cId.toString() === req.user.id);
+    if (!isOwner && !isCollaborator) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to modify this playlist",
@@ -718,6 +731,247 @@ export async function shufflePlaylist(req, res) {
   }
 }
 
+export async function addCollaborator(req, res) {
+  try {
+    const { playlistId } = req.params;
+    const { collaboratorId } = req.body;
+
+    if (!isValidObjectId(playlistId)) {
+      return res.status(400).json({ success: false, message: "Invalid playlist ID" });
+    }
+    if (!collaboratorId || !isValidObjectId(collaboratorId)) {
+      return res.status(400).json({ success: false, message: "Invalid collaborator ID" });
+    }
+
+    const playlist = await Playlist.findById(playlistId);
+    if (!playlist) {
+      return res.status(404).json({ success: false, message: "Playlist not found" });
+    }
+
+    // Only the owner can add collaborators
+    if (playlist.userId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the owner can add collaborators",
+      });
+    }
+
+    if (playlist.userId.toString() === collaboratorId) {
+      return res.status(400).json({
+        success: false,
+        message: "Owner cannot be added as a collaborator",
+      });
+    }
+
+    // Check if collaborator exists in Users collection
+    const collaboratorExists = await User.exists({ _id: collaboratorId });
+    if (!collaboratorExists) {
+      return res.status(404).json({ success: false, message: "Collaborator user not found" });
+    }
+
+    // Prevent duplicates
+    if (playlist.collaborators.some((cId) => cId.toString() === collaboratorId)) {
+      return res.status(409).json({
+        success: false,
+        message: "User is already a collaborator",
+      });
+    }
+
+    playlist.collaborators.push(collaboratorId);
+    await playlist.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Collaborator added successfully",
+      data: {
+        playlistId,
+        collaborators: playlist.collaborators,
+      },
+    });
+  } catch (error) {
+    console.error("Add collaborator error:", error);
+    return res.status(500).json({ success: false, message: "Failed to add collaborator" });
+  }
+}
+
+export async function removeCollaborator(req, res) {
+  try {
+    const { playlistId, userId } = req.params;
+
+    if (!isValidObjectId(playlistId)) {
+      return res.status(400).json({ success: false, message: "Invalid playlist ID" });
+    }
+    if (!userId || !isValidObjectId(userId)) {
+      return res.status(400).json({ success: false, message: "Invalid user ID" });
+    }
+
+    const playlist = await Playlist.findById(playlistId);
+    if (!playlist) {
+      return res.status(404).json({ success: false, message: "Playlist not found" });
+    }
+
+    // Only the owner can remove collaborators
+    if (playlist.userId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the owner can remove collaborators",
+      });
+    }
+
+    const originalLength = playlist.collaborators.length;
+    playlist.collaborators = playlist.collaborators.filter((cId) => cId.toString() !== userId);
+
+    if (playlist.collaborators.length === originalLength) {
+      return res.status(404).json({
+        success: false,
+        message: "User is not a collaborator on this playlist",
+      });
+    }
+
+    await playlist.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Collaborator removed successfully",
+      data: {
+        playlistId,
+        collaborators: playlist.collaborators,
+      },
+    });
+  } catch (error) {
+    console.error("Remove collaborator error:", error);
+    return res.status(500).json({ success: false, message: "Failed to remove collaborator" });
+  }
+}
+
+export async function generateShareLink(req, res) {
+  try {
+    const { playlistId } = req.params;
+
+    if (!isValidObjectId(playlistId)) {
+      return res.status(400).json({ success: false, message: "Invalid playlist ID" });
+    }
+
+    const playlist = await Playlist.findById(playlistId);
+    if (!playlist) {
+      return res.status(404).json({ success: false, message: "Playlist not found" });
+    }
+
+    // Only owner can generate/get the share link
+    if (playlist.userId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to get the share link for this playlist",
+      });
+    }
+
+    // Generate token if it doesn't exist
+    if (!playlist.shareToken) {
+      playlist.shareToken = crypto.randomBytes(16).toString("hex");
+      await playlist.save();
+    }
+
+    // Return the token and absolute/relative url
+    return res.status(200).json({
+      success: true,
+      data: {
+        shareToken: playlist.shareToken,
+        shareUrl: `${config.FRONTEND_URL || "http://localhost:5173"}/playlist/share/${playlist.shareToken}`,
+      },
+    });
+  } catch (error) {
+    console.error("Generate share link error:", error);
+    return res.status(500).json({ success: false, message: "Failed to generate share link" });
+  }
+}
+
+export async function getPlaylistByShareToken(req, res) {
+  try {
+    const { shareToken } = req.params;
+
+    if (!shareToken) {
+      return res.status(400).json({ success: false, message: "Share token is required" });
+    }
+
+    const playlist = await Playlist.findOne({ shareToken })
+      .populate({
+        path: "userId",
+        select: "fullName email role",
+      })
+      .populate({
+        path: "songs",
+        select: "title artist genre album coverImageUrl musicUrl duration playCount likeCount isPublished",
+        match: { isPublished: true },
+      })
+      .lean();
+
+    if (!playlist) {
+      return res.status(404).json({ success: false, message: "Shared playlist not found" });
+    }
+
+    playlist.songs = playlist.songs.filter(Boolean);
+
+    if (playlist.userId) {
+      playlist.creator = {
+        _id: playlist.userId._id,
+        name: `${playlist.userId.fullName?.firstName || ""} ${playlist.userId.fullName?.lastName || ""}`.trim(),
+        email: playlist.userId.email,
+        role: playlist.userId.role,
+      };
+      playlist.userId = playlist.userId._id;
+    }
+
+    const followersCount = await SavedPlaylist.countDocuments({ playlistId: playlist._id });
+    playlist.followersCount = followersCount;
+
+    return res.status(200).json({
+      success: true,
+      message: "Shared playlist fetched successfully",
+      data: playlist,
+    });
+  } catch (error) {
+    console.error("Get playlist by share token error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch shared playlist" });
+  }
+}
+
+export async function getPlaylistFollowers(req, res) {
+  try {
+    const { playlistId } = req.params;
+
+    if (!isValidObjectId(playlistId)) {
+      return res.status(400).json({ success: false, message: "Invalid playlist ID" });
+    }
+
+    const playlist = await Playlist.findById(playlistId);
+    if (!playlist) {
+      return res.status(404).json({ success: false, message: "Playlist not found" });
+    }
+
+    // Only allow viewing followers for public playlists, or private owned by caller
+    if (!playlist.isPublic && playlist.userId.toString() !== req.user?.id) {
+      return res.status(403).json({ success: false, message: "This playlist is private" });
+    }
+
+    const saves = await SavedPlaylist.find({ playlistId })
+      .populate({
+        path: "userId",
+        select: "fullName email role profileImage",
+      })
+      .lean();
+
+    const followers = saves.map((s) => s.userId).filter(Boolean);
+
+    return res.status(200).json({
+      success: true,
+      data: { followers },
+    });
+  } catch (error) {
+    console.error("Get playlist followers error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch playlist followers" });
+  }
+}
+
 export default {
   createPlaylist,
   getMyPlaylists,
@@ -732,4 +986,9 @@ export default {
   getSavedPlaylists,
   playAllPlaylist,
   shufflePlaylist,
+  addCollaborator,
+  removeCollaborator,
+  generateShareLink,
+  getPlaylistByShareToken,
+  getPlaylistFollowers,
 };
