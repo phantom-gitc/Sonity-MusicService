@@ -121,10 +121,26 @@ export async function getPublicPlaylists(req, res) {
     const total = await Playlist.countDocuments({ isPublic: true });
     const playlists = await Playlist.find({ isPublic: true })
       .select("-songs")
+      .populate({
+        path: "userId",
+        select: "fullName email role",
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
+
+    playlists.forEach(playlist => {
+      if (playlist.userId) {
+        playlist.creator = {
+          _id: playlist.userId._id,
+          name: `${playlist.userId.fullName?.firstName || ""} ${playlist.userId.fullName?.lastName || ""}`.trim(),
+          email: playlist.userId.email,
+          role: playlist.userId.role,
+        };
+        playlist.userId = playlist.userId._id;
+      }
+    });
 
     return res.status(200).json({
       success: true,
@@ -174,8 +190,8 @@ export async function getPlaylistById(req, res) {
       })
       .populate({
         path: "songs",
+        // no isPublished filter — addSongToPlaylist already ensures only published songs get added
         select: "title artist genre album coverImageUrl musicUrl duration playCount likeCount isPublished",
-        match: { isPublished: true }, // only show published tracks inside playlist
       })
       .lean();
 
@@ -647,8 +663,7 @@ export async function playAllPlaylist(req, res) {
 
     const playlist = await Playlist.findById(playlistId).populate({
       path: "songs",
-      match: { isPublished: true },
-      select: "title artist musicUrl coverImageUrl duration",
+      select: "title artist musicUrl coverImageUrl duration isPublished",
     });
 
     if (!playlist) {
@@ -691,8 +706,7 @@ export async function shufflePlaylist(req, res) {
 
     const playlist = await Playlist.findById(playlistId).populate({
       path: "songs",
-      match: { isPublished: true },
-      select: "title artist musicUrl coverImageUrl duration",
+      select: "title artist musicUrl coverImageUrl duration isPublished",
     });
 
     if (!playlist) {
@@ -901,7 +915,6 @@ export async function getPlaylistByShareToken(req, res) {
       .populate({
         path: "songs",
         select: "title artist genre album coverImageUrl musicUrl duration playCount likeCount isPublished",
-        match: { isPublished: true },
       })
       .lean();
 

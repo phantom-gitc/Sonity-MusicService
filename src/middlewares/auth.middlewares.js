@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import config from "../config/config.js";
+import User from "../models/user.model.js";
 
 export async function verifyToken(req, res, next) {
   try {
@@ -25,6 +26,21 @@ export async function verifyToken(req, res, next) {
       fullName: decoded.fullName,
       role: decoded.role,
     };
+
+    // Fallback sync to make sure user exists in local collection
+    if (decoded.id) {
+      User.findOneAndUpdate(
+        { _id: decoded.id },
+        {
+          $setOnInsert: { email: `${decoded.id}@sonity.local` },
+          $set: {
+            fullName: decoded.fullName || { firstName: "User", lastName: "" },
+            role: decoded.role || "listener",
+          }
+        },
+        { upsert: true, new: true }
+      ).catch((err) => console.error("Error in fallback user sync:", err));
+    }
 
     next();
   } catch (error) {

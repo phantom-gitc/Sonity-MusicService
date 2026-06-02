@@ -87,6 +87,7 @@ router.get("/genre/:genre",         musicController.getMusicByGenre);
 router.get("/artist/:artistId",     musicController.getMusicByArtist);
 router.post("/artist/:artistId/follow", verifyToken, musicController.toggleFollowArtist);
 router.post("/user/:userId/follow", verifyToken, musicController.toggleFollowUser);
+
 router.get("/user/:userId/follow-stats", (req, res, next) => {
   const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
   if (token) return verifyToken(req, res, next);
