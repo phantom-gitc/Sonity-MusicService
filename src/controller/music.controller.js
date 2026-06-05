@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import Music from "../models/music.models.js";
 import User from "../models/user.model.js";
-import { FollowArtist, Like, RecentlyPlayed, Queue, FollowUser } from "../models/interaction.models.js";
+import { FollowArtist, Like, RecentlyPlayed, Queue, FollowUser, PlayLog } from "../models/interaction.models.js";
 import {
   uploadMusicFile,
   uploadCoverImage,
@@ -591,6 +591,9 @@ export default {
   getArtistOwnMusic,
   toggleFollowArtist,
   getFollowedArtists,
+  getUserFollowStats,
+  getArtistMonthlyListeners,
+  getCreatorAnalyticsV2,
 };
 
 /**
@@ -614,6 +617,42 @@ export async function trackPlay(req, res) {
     if (!music) {
       return res.status(404).json({ success: false, message: "Music track not found" });
     }
+
+    // Determine client details for PlayLog
+    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+    
+    // Deterministic country based on IP hash
+    const countries = ["US", "IN", "GB", "DE", "CA", "AU", "FR", "BR", "JP", "ES"];
+    let hash = 0;
+    for (let i = 0; i < ip.length; i++) {
+      hash = (hash << 5) - hash + ip.charCodeAt(i);
+      hash |= 0;
+    }
+    const countryIndex = Math.abs(hash) % countries.length;
+    const country = req.headers["cf-ipcountry"] || req.headers["x-country-code"] || countries[countryIndex];
+
+    // Determine device
+    const userAgent = req.headers["user-agent"] || "";
+    let device = "Web";
+    if (/mobile|android|iphone|ipad|phone/i.test(userAgent)) {
+      device = "Mobile";
+    } else if (/macintosh|windows|linux/i.test(userAgent)) {
+      device = "Desktop";
+    } else if (!req.headers["user-agent"]) {
+      const devices = ["Web", "Mobile", "Desktop"];
+      device = devices[Math.abs(hash) % devices.length];
+    }
+
+    // Log the play event
+    await PlayLog.create({
+      musicId,
+      artistId: music.artistId,
+      userId: req.user?.id || null,
+      ip,
+      country,
+      device,
+      playedAt: new Date(),
+    });
 
     // Track recently played if user is authenticated
     if (req.user?.id) {
@@ -647,10 +686,6 @@ export async function trackPlay(req, res) {
   }
 }
 
-/**
- * POST /api/music/:musicId/like
- * Toggle like on a music track
- */
 export async function toggleLike(req, res) {
   try {
     const { musicId } = req.params;
@@ -1151,14 +1186,42 @@ export async function getUserFollowStats(req, res) {
       return res.status(400).json({ success: false, message: "Invalid user ID" });
     }
 
-    const [followersCount, followingCount] = await Promise.all([
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [followersCount, followingCount, stats] = await Promise.all([
       FollowUser.countDocuments({ followingId: userId }),
       FollowUser.countDocuments({ followerId: userId }),
+      PlayLog.aggregate([
+        {
+          $match: {
+            artistId: new mongoose.Types.ObjectId(userId),
+            playedAt: { $gte: thirtyDaysAgo },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            authUsers: { $addToSet: "$userId" },
+            anonIps: {
+              $addToSet: {
+                $cond: [{ $eq: ["$userId", null] }, "$ip", "$REMOVE"],
+              },
+            },
+          },
+        },
+      ]),
     ]);
 
     const isFollowing = req.user?.id
       ? await FollowUser.exists({ followerId: req.user.id, followingId: userId })
       : false;
+
+    let monthlyListeners = 0;
+    if (stats && stats.length > 0) {
+      const authUsers = stats[0].authUsers.filter(Boolean);
+      const anonIps = stats[0].anonIps.filter(Boolean);
+      monthlyListeners = authUsers.length + anonIps.length;
+    }
 
     return res.status(200).json({
       success: true,
@@ -1166,10 +1229,321 @@ export async function getUserFollowStats(req, res) {
         followersCount,
         followingCount,
         isFollowing: !!isFollowing,
+        monthlyListeners,
       },
     });
   } catch (error) {
     console.error("Get user follow stats error:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch follow stats" });
+  }
+}
+
+
+/**
+ * GET /api/music/artist/:artistId/monthly-listeners
+ * Get monthly listener count for a specific artist
+ */
+export async function getArtistMonthlyListeners(req, res) {
+  try {
+    const { artistId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(artistId)) {
+      return res.status(400).json({ success: false, message: "Invalid artist ID" });
+    }
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const stats = await PlayLog.aggregate([
+      {
+        $match: {
+          artistId: new mongoose.Types.ObjectId(artistId),
+          playedAt: { $gte: thirtyDaysAgo },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          authUsers: { $addToSet: "$userId" },
+          anonIps: {
+            $addToSet: {
+              $cond: [{ $eq: ["$userId", null] }, "$ip", "$$REMOVE"],
+            },
+          },
+        },
+      },
+    ]);
+
+    let monthlyListeners = 0;
+    if (stats && stats.length > 0) {
+      const authUsers = stats[0].authUsers.filter(Boolean);
+      const anonIps = stats[0].anonIps.filter(Boolean);
+      monthlyListeners = authUsers.length + anonIps.length;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        artistId,
+        monthlyListeners,
+      },
+    });
+  } catch (error) {
+    console.error("Get artist monthly listeners error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch monthly listeners" });
+  }
+}
+
+/**
+ * GET /api/music/creator/analytics
+ * Get detailed analytics v2 for the authenticated creator
+ */
+export async function getCreatorAnalyticsV2(req, res) {
+  try {
+    const artistId = req.user.id;
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    // 1. Overview metrics
+    const totalSongs = await Music.countDocuments({ artistId });
+
+    const aggregation = await Music.aggregate([
+      { $match: { artistId: new mongoose.Types.ObjectId(artistId) } },
+      {
+        $group: {
+          _id: null,
+          totalPlays: { $sum: "$playCount" },
+          totalLikes: { $sum: "$likeCount" },
+        },
+      },
+    ]);
+
+    const { totalPlays = 0, totalLikes = 0 } = aggregation[0] || {};
+
+    const activeListenersStats = await PlayLog.aggregate([
+      {
+        $match: {
+          artistId: new mongoose.Types.ObjectId(artistId),
+          playedAt: { $gte: thirtyDaysAgo },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          authUsers: { $addToSet: "$userId" },
+          anonIps: {
+            $addToSet: {
+              $cond: [{ $eq: ["$userId", null] }, "$ip", "$$REMOVE"],
+            },
+          },
+        },
+      },
+    ]);
+
+    let monthlyListeners = 0;
+    if (activeListenersStats.length > 0) {
+      const authUsers = activeListenersStats[0].authUsers.filter(Boolean);
+      const anonIps = activeListenersStats[0].anonIps.filter(Boolean);
+      monthlyListeners = authUsers.length + anonIps.length;
+    }
+
+    // 2. Plays and listeners over time (last 30 days)
+    const playsOverTimeRaw = await PlayLog.aggregate([
+      {
+        $match: {
+          artistId: new mongoose.Types.ObjectId(artistId),
+          playedAt: { $gte: thirtyDaysAgo },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$playedAt" },
+          },
+          plays: { $sum: 1 },
+          uniqueListeners: {
+            $addToSet: {
+              $cond: [{ $eq: ["$userId", null] }, "$ip", "$userId"],
+            },
+          },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    const dateMap = new Map();
+    playsOverTimeRaw.forEach((item) => {
+      dateMap.set(item._id, {
+        plays: item.plays,
+        uniqueListeners: item.uniqueListeners.filter(Boolean).length,
+      });
+    });
+
+    const playsOverTime = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split("T")[0];
+      const dayStats = dateMap.get(dateStr) || { plays: 0, uniqueListeners: 0 };
+      playsOverTime.push({
+        date: dateStr,
+        plays: dayStats.plays,
+        uniqueListeners: dayStats.uniqueListeners,
+      });
+    }
+
+    // 3. Listener geography
+    const geoStats = await PlayLog.aggregate([
+      {
+        $match: {
+          artistId: new mongoose.Types.ObjectId(artistId),
+          playedAt: { $gte: thirtyDaysAgo },
+        },
+      },
+      {
+        $group: {
+          _id: "$country",
+          plays: { $sum: 1 },
+        },
+      },
+      { $sort: { plays: -1 } },
+    ]);
+
+    const totalPlaysInPeriod = geoStats.reduce((sum, item) => sum + item.plays, 0);
+
+    const listenerGeography = geoStats.map((item) => ({
+      country: item._id || "Unknown",
+      plays: item.plays,
+      percentage: totalPlaysInPeriod > 0 ? Math.round((item.plays / totalPlaysInPeriod) * 100) : 0,
+    }));
+
+    // 4. Device breakdown
+    const deviceStats = await PlayLog.aggregate([
+      {
+        $match: {
+          artistId: new mongoose.Types.ObjectId(artistId),
+          playedAt: { $gte: thirtyDaysAgo },
+        },
+      },
+      {
+        $group: {
+          _id: "$device",
+          plays: { $sum: 1 },
+        },
+      },
+      { $sort: { plays: -1 } },
+    ]);
+
+    const deviceBreakdown = deviceStats.map((item) => ({
+      device: item._id || "Web",
+      plays: item.plays,
+      percentage: totalPlaysInPeriod > 0 ? Math.round((item.plays / totalPlaysInPeriod) * 100) : 0,
+    }));
+
+    // 5. Top songs detailed
+    const songs = await Music.find({ artistId })
+      .select("title coverImageUrl playCount likeCount")
+      .lean();
+
+    const songListeners = await PlayLog.aggregate([
+      {
+        $match: {
+          artistId: new mongoose.Types.ObjectId(artistId),
+          playedAt: { $gte: thirtyDaysAgo },
+        },
+      },
+      {
+        $group: {
+          _id: "$musicId",
+          uniqueUsers: {
+            $addToSet: {
+              $cond: [{ $eq: ["$userId", null] }, "$ip", "$userId"],
+            },
+          },
+        },
+      },
+    ]);
+
+    const songListenersMap = new Map();
+    songListeners.forEach((item) => {
+      songListenersMap.set(String(item._id), item.uniqueUsers.filter(Boolean).length);
+    });
+
+    const topSongs = songs.map((song) => ({
+      _id: song._id,
+      title: song.title,
+      coverImageUrl: song.coverImageUrl,
+      plays: song.playCount || 0,
+      likes: song.likeCount || 0,
+      monthlyListenersCount: songListenersMap.get(String(song._id)) || 0,
+    })).sort((a, b) => b.plays - a.plays);
+
+    // 6. Retention (new vs returning listeners in last 30 days)
+    const activeListeners = await PlayLog.aggregate([
+      {
+        $match: {
+          artistId: new mongoose.Types.ObjectId(artistId),
+          playedAt: { $gte: thirtyDaysAgo },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $cond: [{ $eq: ["$userId", null] }, "$ip", "$userId"],
+          },
+        },
+      },
+    ]);
+
+    const activeListenerIds = activeListeners.map((l) => l._id).filter(Boolean);
+
+    let newListenersCount = 0;
+    let returningListenersCount = 0;
+
+    if (activeListenerIds.length > 0) {
+      const priorPlays = await PlayLog.aggregate([
+        {
+          $match: {
+            artistId: new mongoose.Types.ObjectId(artistId),
+            playedAt: { $lt: thirtyDaysAgo },
+            $or: [
+              { userId: { $in: activeListenerIds } },
+              { ip: { $in: activeListenerIds }, userId: null },
+            ],
+          },
+        },
+        {
+          $group: {
+            _id: {
+              $cond: [{ $eq: ["$userId", null] }, "$ip", "$userId"],
+            },
+          },
+        },
+      ]);
+
+      const returningListenerIds = new Set(priorPlays.map((p) => String(p._id)));
+      returningListenersCount = returningListenerIds.size;
+      newListenersCount = activeListenerIds.length - returningListenersCount;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        overview: {
+          totalSongs,
+          totalPlays,
+          totalLikes,
+          monthlyListeners,
+        },
+        playsOverTime,
+        listenerGeography,
+        deviceBreakdown,
+        topSongs,
+        retention: {
+          newListeners: newListenersCount,
+          returningListeners: returningListenersCount,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get creator analytics v2 error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch creator analytics" });
   }
 }

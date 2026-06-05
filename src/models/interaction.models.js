@@ -113,12 +113,55 @@ const followUserSchema = new mongoose.Schema(
 followUserSchema.index({ followerId: 1, followingId: 1 }, { unique: true });
 followUserSchema.index({ followingId: 1 });
 
+// PlayLog Schema
+const playLogSchema = new mongoose.Schema(
+  {
+    musicId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      ref: "Music",
+    },
+    artistId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      ref: "User",
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      ref: "User",
+    },
+    ip: {
+      type: String,
+      required: true,
+    },
+    country: {
+      type: String,
+      default: "US",
+    },
+    device: {
+      type: String,
+      default: "Web",
+    },
+    playedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { timestamps: true }
+);
+
+playLogSchema.index({ artistId: 1, playedAt: -1 });
+playLogSchema.index({ musicId: 1, playedAt: -1 });
+playLogSchema.index({ artistId: 1, userId: 1, playedAt: -1 });
+
 export const Like = mongoose.model("Like", likeSchema);
 export const RecentlyPlayed = mongoose.model("RecentlyPlayed", recentlyPlayedSchema);
 export const SavedPlaylist = mongoose.model("SavedPlaylist", savedPlaylistSchema);
 export const FollowArtist = mongoose.model("FollowArtist", followArtistSchema);
 export const FollowUser = mongoose.model("FollowUser", followUserSchema);
 export const Queue = mongoose.model("Queue", queueSchema);
+export const PlayLog = mongoose.model("PlayLog", playLogSchema);
 
 export default {
   Like,
@@ -127,4 +170,6 @@ export default {
   FollowArtist,
   FollowUser,
   Queue,
+  PlayLog,
 };
+

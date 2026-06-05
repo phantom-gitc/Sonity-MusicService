@@ -77,6 +77,7 @@ router.get("/library/followed-users", verifyToken, musicController.getFollowedUs
 // ─── Creator Routes (must come before /:musicId) ─────────────────────────────
 
 router.get("/creator/stats",        verifyToken, verifyArtist, musicController.getCreatorStats);
+router.get("/creator/analytics",    verifyToken, verifyArtist, musicController.getCreatorAnalyticsV2);
 router.get("/artist-musics",        verifyToken, verifyArtist, musicController.getArtistOwnMusic);
 
 // ─── Public Routes ───────────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ router.get("/",                     musicController.getAllMusic);
 router.get("/search",               validateSearchQuery, musicController.searchMusic);
 router.get("/genre/:genre",         musicController.getMusicByGenre);
 router.get("/artist/:artistId",     musicController.getMusicByArtist);
+router.get("/artist/:artistId/monthly-listeners", musicController.getArtistMonthlyListeners);
 router.post("/artist/:artistId/follow", verifyToken, musicController.toggleFollowArtist);
 router.post("/user/:userId/follow", verifyToken, musicController.toggleFollowUser);
 
