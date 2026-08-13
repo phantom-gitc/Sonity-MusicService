@@ -103,11 +103,20 @@ export async function getAllMusic(req, res) {
       .limit(limit)
       .lean();
 
+    // Annotate isLiked per authenticated user
+    let annotated = musicTracks;
+    if (req.user?.id && musicTracks.length > 0) {
+      const ids = musicTracks.map(t => t._id);
+      const likedDocs = await Like.find({ userId: req.user.id, musicId: { $in: ids } }).select("musicId").lean();
+      const likedSet = new Set(likedDocs.map(l => String(l.musicId)));
+      annotated = musicTracks.map(t => ({ ...t, isLiked: likedSet.has(String(t._id)) }));
+    }
+
     return res.status(200).json({
       success: true,
       message: "Music fetched successfully",
       data: {
-        tracks: musicTracks,
+        tracks: annotated,
         pagination: {
           currentPage: page,
           totalPages: Math.ceil(totalMusic / limit),
@@ -155,10 +164,34 @@ export async function getMusicById(req, res) {
       });
     }
 
+    // Fetch real-time artist info from User model
+    let realArtistName = musicTrack.artist;
+    let artistProfileImage = null;
+    if (musicTrack.artistId) {
+      const artistUser = await User.findById(musicTrack.artistId).select("fullName profileImage").lean();
+      if (artistUser?.fullName) {
+        realArtistName = `${artistUser.fullName.firstName} ${artistUser.fullName.lastName || ""}`.trim();
+      }
+      artistProfileImage = artistUser?.profileImage || null;
+    }
+
+    // Annotate isLiked for authenticated user
+    let isLiked = false;
+    if (req.user?.id) {
+      const likedDoc = await Like.findOne({ userId: req.user.id, musicId }).lean();
+      isLiked = !!likedDoc;
+    }
+
     return res.status(200).json({
       success: true,
       message: "Music track fetched successfully",
-      data: musicTrack,
+      data: {
+        ...musicTrack,
+        artist: realArtistName,
+        artistName: realArtistName,
+        artistProfileImage,
+        isLiked,
+      },
     });
   } catch (error) {
     console.error("Get music error:", error);
@@ -425,11 +458,20 @@ export async function getMusicByArtist(req, res) {
       .limit(limit)
       .lean();
 
+    // Annotate isLiked per authenticated user
+    let annotated = musicTracks;
+    if (req.user?.id && musicTracks.length > 0) {
+      const ids = musicTracks.map(t => t._id);
+      const likedDocs = await Like.find({ userId: req.user.id, musicId: { $in: ids } }).select("musicId").lean();
+      const likedSet = new Set(likedDocs.map(l => String(l.musicId)));
+      annotated = musicTracks.map(t => ({ ...t, isLiked: likedSet.has(String(t._id)) }));
+    }
+
     return res.status(200).json({
       success: true,
       message: "Artist music fetched successfully",
       data: {
-        tracks: musicTracks,
+        tracks: annotated,
         pagination: {
           currentPage: page,
           totalPages: Math.ceil(totalMusic / limit),
@@ -932,12 +974,19 @@ export async function getCreatorStats(req, res) {
       .limit(5)
       .lean();
 
+    const [artistFollowsCount, userFollowsCount] = await Promise.all([
+      FollowArtist.countDocuments({ artistId }),
+      FollowUser.countDocuments({ followingId: artistId }),
+    ]);
+    const totalFollowers = artistFollowsCount + userFollowsCount;
+
     return res.status(200).json({
       success: true,
       data: {
         totalSongs,
         totalPlays,
         totalLikes,
+        totalFollowers,
         topSongs,
       },
     });
@@ -1188,7 +1237,8 @@ export async function getUserFollowStats(req, res) {
 
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-    const [followersCount, followingCount, stats] = await Promise.all([
+    const [artistFollowersCount, userFollowersCount, followingCount, stats, artistUser] = await Promise.all([
+      FollowArtist.countDocuments({ artistId: userId }),
       FollowUser.countDocuments({ followingId: userId }),
       FollowUser.countDocuments({ followerId: userId }),
       PlayLog.aggregate([
@@ -1210,11 +1260,20 @@ export async function getUserFollowStats(req, res) {
           },
         },
       ]),
+      User.findById(userId).select("fullName email profileImage role").lean(),
     ]);
 
-    const isFollowing = req.user?.id
-      ? await FollowUser.exists({ followerId: req.user.id, followingId: userId })
-      : false;
+    const followersCount = artistFollowersCount + userFollowersCount;
+
+    // Check both FollowArtist (from toggleFollowArtist) and FollowUser (from toggleFollowUser)
+    let isFollowing = false;
+    if (req.user?.id) {
+      const [artistFollow, userFollow] = await Promise.all([
+        FollowArtist.exists({ userId: req.user.id, artistId: userId }),
+        FollowUser.exists({ followerId: req.user.id, followingId: userId }),
+      ]);
+      isFollowing = !!(artistFollow || userFollow);
+    }
 
     let monthlyListeners = 0;
     if (stats && stats.length > 0) {
@@ -1223,6 +1282,10 @@ export async function getUserFollowStats(req, res) {
       monthlyListeners = authUsers.length + anonIps.length;
     }
 
+    const artistName = artistUser?.fullName
+      ? `${artistUser.fullName.firstName} ${artistUser.fullName.lastName || ""}`.trim()
+      : null;
+
     return res.status(200).json({
       success: true,
       data: {
@@ -1230,6 +1293,8 @@ export async function getUserFollowStats(req, res) {
         followingCount,
         isFollowing: !!isFollowing,
         monthlyListeners,
+        artistName,
+        profileImage: artistUser?.profileImage || null,
       },
     });
   } catch (error) {
@@ -1547,3 +1612,41 @@ export async function getCreatorAnalyticsV2(req, res) {
     return res.status(500).json({ success: false, message: "Failed to fetch creator analytics" });
   }
 }
+
+/**
+ * GET /api/music/creator/followers
+ * Get list of all users following the authenticated artist/creator
+ */
+export async function getArtistFollowers(req, res) {
+  try {
+    const artistId = req.user.id;
+
+    const [artistFollows, userFollows] = await Promise.all([
+      FollowArtist.find({ artistId }).sort({ createdAt: -1 }).lean(),
+      FollowUser.find({ followingId: artistId }).sort({ createdAt: -1 }).lean(),
+    ]);
+
+    const followerUserIds = [
+      ...new Set([
+        ...artistFollows.map((f) => String(f.userId)),
+        ...userFollows.map((f) => String(f.followerId)),
+      ]),
+    ];
+
+    const followers = await User.find({ _id: { $in: followerUserIds } })
+      .select("fullName email profileImage role createdAt")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        totalFollowers: followers.length,
+        followers,
+      },
+    });
+  } catch (error) {
+    console.error("Get artist followers error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch artist followers" });
+  }
+}
+

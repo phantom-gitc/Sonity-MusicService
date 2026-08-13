@@ -23,6 +23,7 @@ const config = {
   AUTH_SERVICE_URL: process.env.AUTH_SERVICE_URL || "http://localhost:3000",
   NOTIFICATION_SERVICE_URL: process.env.NOTIFICATION_SERVICE_URL || "http://localhost:3001",
   FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:5173",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY,
 };
 
 // Validate required environment variables

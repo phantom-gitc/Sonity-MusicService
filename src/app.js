@@ -5,6 +5,7 @@ import cors from "cors";
 import musicRoutes    from "./routes/music.routes.js";
 import playlistRoutes from "./routes/playlist.routes.js";
 import albumRoutes    from "./routes/album.routes.js";
+import aiRoutes       from "./routes/ai.routes.js";
 import mongoose from "mongoose";
 import config from "./config/config.js";
 import { createRateLimiter, securityHeaders } from "./middlewares/security.middlewares.js";
@@ -20,7 +21,9 @@ app.use(cors({
 
 app.use(securityHeaders);
 app.use(createRateLimiter({ windowMs: 15 * 60 * 1000, max: 500 }));
-app.use(morgan("dev")); // Request logging
+// 'combined' in prod writes IP + user-agent — useful for log aggregation tools.
+// 'dev' in development gives colorized short output for local debugging.
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "2mb" })); // JSON body parser; file uploads still use multipart routes
 app.use(express.urlencoded({ limit: "2mb", extended: true }));
 app.use(cookieParser()); // Cookie parser
@@ -44,6 +47,7 @@ app.get("/ready", (req, res) => {
 });
 
 // API Routes
+app.use("/api/music/ai", aiRoutes);
 app.use("/api/music",    musicRoutes);
 app.use("/api/playlist", playlistRoutes);
 app.use("/api/album",    albumRoutes);

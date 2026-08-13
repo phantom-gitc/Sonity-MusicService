@@ -58,7 +58,7 @@ const upload = multer({
   },
 });
 
-// ─── Queue Routes (must come before /:musicId) ──────────────────────────────
+// ─── Queue Routes (must come before /:musicId) 
 
 router.get("/queue",                verifyToken, musicController.getQueue);
 router.post("/queue",               verifyToken, musicController.setQueue);
@@ -78,24 +78,28 @@ router.get("/library/followed-users", verifyToken, musicController.getFollowedUs
 
 router.get("/creator/stats",        verifyToken, verifyArtist, musicController.getCreatorStats);
 router.get("/creator/analytics",    verifyToken, verifyArtist, musicController.getCreatorAnalyticsV2);
+router.get("/creator/followers",    verifyToken, verifyArtist, musicController.getArtistFollowers);
 router.get("/artist-musics",        verifyToken, verifyArtist, musicController.getArtistOwnMusic);
 
 // ─── Public Routes ───────────────────────────────────────────────────────────
 
-router.get("/",                     musicController.getAllMusic);
+// Helper: optionally verify token without blocking unauthenticated requests
+function optionalAuth(req, res, next) {
+  const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
+  if (token) return verifyToken(req, res, next);
+  next();
+}
+
+router.get("/",                     optionalAuth, musicController.getAllMusic);
 router.get("/search",               validateSearchQuery, musicController.searchMusic);
 router.get("/genre/:genre",         musicController.getMusicByGenre);
-router.get("/artist/:artistId",     musicController.getMusicByArtist);
+router.get("/artist/:artistId",     optionalAuth, musicController.getMusicByArtist);
 router.get("/artist/:artistId/monthly-listeners", musicController.getArtistMonthlyListeners);
 router.post("/artist/:artistId/follow", verifyToken, musicController.toggleFollowArtist);
 router.post("/user/:userId/follow", verifyToken, musicController.toggleFollowUser);
 
-router.get("/user/:userId/follow-stats", (req, res, next) => {
-  const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
-  if (token) return verifyToken(req, res, next);
-  next();
-}, musicController.getUserFollowStats);
-router.get("/:musicId",             musicController.getMusicById);
+router.get("/user/:userId/follow-stats", optionalAuth, musicController.getUserFollowStats);
+router.get("/:musicId",             optionalAuth, musicController.getMusicById);
 router.get("/:musicId/related",     musicController.getRelatedTracks);
 
 // ─── Protected Routes — Auth Required ────────────────────────────────────────
